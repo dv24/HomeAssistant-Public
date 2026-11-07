@@ -1,0 +1,66 @@
+# Daily reminder listing every low battery, with a "Replaced" button per device.
+#
+# Needs:
+#   - The Battery Notes integration (HACS / Marketplace). It provides the
+#     "<device>_low" binary sensors and the battery_notes.set_battery_replaced action.
+#   - The Home Assistant Companion app. Replace notify.mobile_app_your_phone with your device.
+#
+# Tapping a "Replaced: <device>" button records the swap in Battery Notes.
+# Notifications show at most 10 buttons (a platform limit).
+
+alias: "Batteries: daily replacement reminder"
+description: >-
+  At 7pm, if any Battery Notes device is low, notifies your phone listing each one,
+  with a 'Replaced' button per device that records the replacement in Battery Notes.
+mode: queued
+triggers:
+  - trigger: time
+    at: "19:00:00"
+    id: reminder
+  - trigger: event
+    event_type: mobile_app_notification_action
+    id: replaced
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: reminder
+        sequence:
+          - variables:
+              low: >-
+                {{ integration_entities('battery_notes')
+                   | select('match', 'binary_sensor\..*_low$')
+                   | select('is_state', 'on') | sort | list }}
+          - alias: Nothing is low, so stop here
+            condition: template
+            value_template: "{{ low | count > 0 }}"
+          - variables:
+              buttons: >-
+                {% set ns = namespace(b=[]) %}
+                {% for e in low[:10] %}
+                {% set ns.b = ns.b + [{'action': 'BATTERY_REPLACED_' ~ state_attr(e, 'device_id'),
+                                       'title': 'Replaced: ' ~ state_attr(e, 'device_name')}] %}
+                {% endfor %}
+                {{ ns.b }}
+              lines: >-
+                {% for e in low %}
+                {{ state_attr(e, 'device_name') }}:
+                {{ states(e | replace('binary_sensor.', 'sensor.') | replace('_low', '')) | float(0) | round(0) | int }}%
+                ({{ state_attr(e, 'battery_type_and_quantity') }}){{ '\n' if not loop.last }}
+                {% endfor %}
+          - action: notify.mobile_app_your_phone
+            data:
+              title: Batteries to replace
+              message: "{{ lines }}"
+              data:
+                actions: "{{ buttons }}"
+                tag: battery-reminder
+      - conditions:
+          - condition: trigger
+            id: replaced
+          - condition: template
+            value_template: "{{ (trigger.event.data.action | string).startswith('BATTERY_REPLACED_') }}"
+        sequence:
+          - action: battery_notes.set_battery_replaced
+            data:
+              device_id: "{{ trigger.event.data.action | replace('BATTERY_REPLACED_', '') }}"

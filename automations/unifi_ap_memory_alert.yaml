@@ -1,0 +1,52 @@
+# UniFi access-point health alert.
+#
+# Needs: the UniFi Network integration (memory utilisation sensors enabled for each AP)
+# and the Companion app (replace notify.mobile_app_your_phone with your device).
+# Replace the sensor.ap_N_memory_utilisation placeholders with your own AP sensors.
+#
+# - Memory above 90% for 30 minutes: suggests rebooting that AP.
+# - Memory sensors unavailable for 2 hours: the UniFi integration is probably down.
+
+alias: UniFi AP memory / monitoring alert
+mode: queued
+max: 10
+triggers:
+  - trigger: numeric_state
+    id: high_mem
+    entity_id:
+      - sensor.ap_1_memory_utilisation
+      - sensor.ap_2_memory_utilisation
+      - sensor.ap_3_memory_utilisation
+      - sensor.ap_4_memory_utilisation
+    above: 90
+    for: "00:30:00"
+  - trigger: state
+    id: integration_down
+    entity_id:
+      - sensor.ap_1_memory_utilisation
+      - sensor.ap_2_memory_utilisation
+      - sensor.ap_3_memory_utilisation
+    to: unavailable
+    for: "02:00:00"
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: high_mem
+        sequence:
+          - action: notify.mobile_app_your_phone
+            data:
+              title: UniFi AP memory high
+              message: >-
+                {{ trigger.to_state.name }} is at {{ trigger.to_state.state }}%
+                for 30+ minutes. Consider rebooting that AP.
+      - conditions:
+          - condition: trigger
+            id: integration_down
+        sequence:
+          - action: notify.mobile_app_your_phone
+            data:
+              title: UniFi data unavailable
+              message: >-
+                {{ trigger.to_state.name }} has been unavailable for 2 hours.
+                Check the UniFi integration in Home Assistant.

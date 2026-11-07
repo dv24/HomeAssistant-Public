@@ -1,0 +1,115 @@
+# Washer / tumble drier cycle detection from a power-monitoring smart plug, with
+# "cycle running" and "finished" phone notifications. Copy the pair once per appliance.
+#
+# Needs, per appliance:
+#   sensor.washing_machine_power            power (W) from a smart plug
+#   input_boolean.washing_machine_running   a helper that records "cycle in progress"
+# and the Companion app (replace notify.mobile_app_your_phone with your device).
+#
+# Thresholds: above 10 W for 30 s = started; below 3 W for 20 s = finished.
+# Adjust for your appliance's standby and idle draw.
+# The "running" notification is a live-updating chronometer on Android and iOS.
+
+- alias: Washer on
+  mode: single
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.washing_machine_power
+      above: 10
+      for: "00:00:30"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.washing_machine_running
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.washing_machine_running
+    - action: notify.mobile_app_your_phone
+      data:
+        title: Washing machine
+        message: Cycle running
+        data:
+          tag: washer_cycle
+          live_update: true
+          chronometer: true
+          when: 0
+          when_relative: true
+          notification_icon: mdi:washing-machine
+
+- alias: Washer off
+  mode: single
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.washing_machine_power
+      below: 3
+      for: "00:00:20"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.washing_machine_running
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.washing_machine_running
+    - action: notify.mobile_app_your_phone
+      data:
+        message: clear_notification
+        data:
+          tag: washer_cycle
+    - action: notify.mobile_app_your_phone
+      data:
+        title: Washing machine
+        message: The washing machine has finished.
+
+- alias: Tumble drier on
+  mode: single
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.tumble_drier_power
+      above: 10
+      for: "00:00:30"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.tumble_drier_running
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.tumble_drier_running
+    - action: notify.mobile_app_your_phone
+      data:
+        title: Tumble drier
+        message: Cycle running
+        data:
+          tag: tumble_drier_cycle
+          live_update: true
+          chronometer: true
+          when: 0
+          when_relative: true
+          notification_icon: mdi:tumble-dryer
+
+- alias: Tumble drier off
+  mode: single
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.tumble_drier_power
+      below: 3
+      for: "00:00:20"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.tumble_drier_running
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.tumble_drier_running
+    - action: notify.mobile_app_your_phone
+      data:
+        message: clear_notification
+        data:
+          tag: tumble_drier_cycle
+    - action: notify.mobile_app_your_phone
+      data:
+        title: Tumble drier
+        message: The tumble drier has finished.

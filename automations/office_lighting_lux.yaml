@@ -1,0 +1,139 @@
+# Office lighting: automatic brightness / colour temperature from ambient lux,
+# with manual-override detection so it never fights you.
+#
+# Four automations. Put them in automations.yaml or paste each into the UI editor
+# ("Edit in YAML"). Replace the placeholder entities with your own.
+#
+# Needs:
+#   input_boolean.desk_presence                  you at your desk (any presence signal you like)
+#   input_boolean.office_lighting_manual_override
+#   input_boolean.office_lighting_automatic_change   (flags changes made by the automation)
+#   sensor.office_ambient_lux                    lux reading (a Min/Max helper of several sensors works well)
+#   light.office_lights                          the light (or light group) to control
+#   light.office_light_1, light.office_light_2   the individual lights, for override detection
+
+- alias: Office Lighting - Automatic Lux
+  description: >-
+    Sets office light brightness and colour temperature from ambient lux while you
+    are at the desk. Off above 500 lux; otherwise dimmer in brighter rooms
+    (70% / 55% / 45% / 25%), warmer later in the day.
+  mode: restart
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.desk_presence
+      from: "off"
+      to: "on"
+    - trigger: state
+      entity_id: sensor.office_ambient_lux
+    - trigger: time
+      at: "08:00:00"
+    - trigger: time
+      at: "17:00:00"
+    - trigger: time
+      at: "21:00:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.desk_presence
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.office_lighting_manual_override
+      state: "off"
+  actions:
+    - alias: Flag the change as automatic
+      action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.office_lighting_automatic_change
+    - alias: Work out target level and colour temperature
+      variables:
+        lux: "{{ states('sensor.office_ambient_lux') | float(0) }}"
+        brightness: "{{ 70 if lux <= 50 else 55 if lux <= 150 else 45 if lux <= 300 else 25 }}"
+        kelvin: "{% set h = now().hour %}{{ 2700 if h < 8 or h >= 21 else 3200 if h < 17 else 2900 }}"
+    - alias: Apply lighting for the ambient lux
+      choose:
+        - alias: "Bright enough: lights off"
+          conditions:
+            - condition: numeric_state
+              entity_id: sensor.office_ambient_lux
+              above: 500
+          sequence:
+            - action: light.turn_off
+              target:
+                entity_id: light.office_lights
+        - alias: "Dimmer room: light to match"
+          conditions:
+            - condition: numeric_state
+              entity_id: sensor.office_ambient_lux
+              below: 501
+          sequence:
+            - action: light.turn_on
+              target:
+                entity_id: light.office_lights
+              data:
+                brightness_pct: "{{ brightness }}"
+                color_temp_kelvin: "{{ kelvin }}"
+    - alias: Let the lights settle
+      delay:
+        seconds: 2
+    - alias: Clear the automatic-change flag
+      action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.office_lighting_automatic_change
+
+- alias: Office Lighting - Manual Override
+  description: Detects manual changes to either office light.
+  mode: restart
+  triggers:
+    - trigger: state
+      entity_id:
+        - light.office_light_1
+        - light.office_light_2
+  conditions:
+    - condition: state
+      entity_id: input_boolean.desk_presence
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.office_lighting_automatic_change
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.office_lighting_manual_override
+
+- alias: Office Lighting - Clear Manual Override
+  description: >-
+    Clears the manual override at sunrise, sunset, 23:29 and 05:00 so automatic
+    lux control resumes.
+  mode: single
+  triggers:
+    - trigger: sun
+      event: sunrise
+    - trigger: sun
+      event: sunset
+    - trigger: time
+      at: "23:29:00"
+    - trigger: time
+      at: "05:00:00"
+  actions:
+    - alias: Clear the manual override
+      action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.office_lighting_manual_override
+
+- alias: Office Lighting - Away
+  description: Turns off office lighting and clears the override flags when you leave the desk.
+  mode: single
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.desk_presence
+      from: "on"
+      to: "off"
+  actions:
+    - action: light.turn_off
+      target:
+        entity_id: light.office_lights
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.office_lighting_manual_override
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.office_lighting_automatic_change

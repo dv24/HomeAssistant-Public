@@ -1,0 +1,24 @@
+# Pause a speaker when a Microsoft Teams call starts.
+#
+# Needs: a sensor that reports Teams activity (here sensor.microsoft_teams_activity
+# with the state "In a call"), and a media player to pause.
+# Uses the purpose-specific media_player.is_playing condition (Home Assistant 2026.7+);
+# on older versions use a plain state condition on the player instead.
+
+alias: Pause speaker during Teams call
+mode: single
+triggers:
+  - trigger: state
+    entity_id: sensor.microsoft_teams_activity
+    to: In a call
+conditions:
+  - condition: media_player.is_playing
+    target:
+      entity_id: media_player.office_speaker
+    options:
+      behavior: any
+      for: "00:00:00"
+actions:
+  - action: media_player.media_pause
+    target:
+      entity_id: media_player.office_speaker
