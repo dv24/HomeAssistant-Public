@@ -1,17 +1,33 @@
+# Silence speakers while a chosen artist (here Coldplay) is playing, then restore them.
+#
+# Two kinds of player are handled:
+#   - Music Assistant players: muted, then unmuted afterwards.
+#   - AirPlay playback started from a phone or Mac: AirPlay entities can't be muted, so the
+#     volume is saved to a helper, dropped to 0, then restored. This branch only runs when the
+#     matching Music Assistant player isn't playing, so nothing is handled twice.
+#
+# Needs:
+#   - Music Assistant players and their AirPlay entities (change the entity IDs below).
+#   - One input_number helper per AirPlay speaker (min 0, max 1, step 0.01) to hold the saved volume.
+#
+# Change the artist by editing 'coldplay' in cold_now and cold_was (keep it lower case).
+# Limits: the artist only appears once a track starts, so a second or two can leak at the
+# start. A Home Assistant restart during a track clears the saved volume (restore it by hand).
+
 alias: Mute speakers while Coldplay plays
-description: >-
-  Mutes any Music Assistant speaker whose current artist contains Coldplay,
-  and unmutes it when the track ends or playback stops.
 mode: parallel
 max: 10
 triggers:
   - trigger: state
     entity_id: &players
-      - media_player.kitchen_2
+      - media_player.kitchen
       - media_player.office
       - media_player.bedroom
-      - media_player.surround_sound
+      - media_player.living_room
       - media_player.lounge
+      - media_player.office_airplay
+      - media_player.bedroom_airplay
+      - media_player.lounge_airplay
     attribute: media_artist
     id: artist
   - trigger: state
@@ -19,6 +35,17 @@ triggers:
     id: state
 variables:
   active: [playing, paused]
+  airplay_map:
+    media_player.office_airplay:
+      ma: media_player.office
+      saved: input_number.saved_volume_office
+    media_player.bedroom_airplay:
+      ma: media_player.bedroom
+      saved: input_number.saved_volume_bedroom
+    media_player.lounge_airplay:
+      ma: media_player.lounge
+      saved: input_number.saved_volume_lounge
+  is_airplay: "{{ trigger.entity_id in airplay_map }}"
   cold_now: >-
     {{ 'coldplay' in (trigger.to_state.attributes.media_artist | default('', true) | lower)
        and trigger.to_state.state in active }}
@@ -27,25 +54,59 @@ variables:
        and 'coldplay' in (trigger.from_state.attributes.media_artist | default('', true) | lower)
        and trigger.from_state.state in active }}
   muted: "{{ trigger.to_state.attributes.is_volume_muted | default(false) }}"
+  vol: "{{ trigger.to_state.attributes.volume_level | default(0, true) | float(0) }}"
+  ma_busy: "{{ is_airplay and states(airplay_map[trigger.entity_id].ma) in active }}"
+  saved_helper: "{{ airplay_map[trigger.entity_id].saved if is_airplay else '' }}"
+  saved_vol: "{{ states(saved_helper) | float(0) if is_airplay else 0 }}"
 actions:
   - choose:
-      - alias: "Coldplay started: mute"
+      - alias: "Music Assistant player, Coldplay started: mute"
         conditions:
           - condition: template
-            value_template: "{{ cold_now and not muted }}"
+            value_template: "{{ not is_airplay and cold_now and not muted }}"
         sequence:
           - action: media_player.volume_mute
             target:
               entity_id: "{{ trigger.entity_id }}"
             data:
               is_volume_muted: true
-      - alias: "Coldplay ended: unmute"
+      - alias: "Music Assistant player, Coldplay ended: unmute"
         conditions:
           - condition: template
-            value_template: "{{ cold_was and not cold_now and muted }}"
+            value_template: "{{ not is_airplay and cold_was and not cold_now and muted }}"
         sequence:
           - action: media_player.volume_mute
             target:
               entity_id: "{{ trigger.entity_id }}"
             data:
               is_volume_muted: false
+      - alias: "AirPlay playback, Coldplay started: save volume, set to 0"
+        conditions:
+          - condition: template
+            value_template: "{{ is_airplay and not ma_busy and cold_now and vol > 0.01 }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ saved_helper }}"
+            data:
+              value: "{{ vol }}"
+          - action: media_player.volume_set
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+            data:
+              volume_level: 0
+      - alias: "AirPlay playback, Coldplay ended: restore volume"
+        conditions:
+          - condition: template
+            value_template: "{{ is_airplay and cold_was and not cold_now and vol < 0.01 and saved_vol > 0 }}"
+        sequence:
+          - action: media_player.volume_set
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+            data:
+              volume_level: "{{ saved_vol }}"
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ saved_helper }}"
+            data:
+              value: 0
