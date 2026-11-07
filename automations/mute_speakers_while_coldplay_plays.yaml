@@ -1,0 +1,51 @@
+alias: Mute speakers while Coldplay plays
+description: >-
+  Mutes any Music Assistant speaker whose current artist contains Coldplay,
+  and unmutes it when the track ends or playback stops.
+mode: parallel
+max: 10
+triggers:
+  - trigger: state
+    entity_id: &players
+      - media_player.kitchen_2
+      - media_player.office
+      - media_player.bedroom
+      - media_player.surround_sound
+      - media_player.lounge
+    attribute: media_artist
+    id: artist
+  - trigger: state
+    entity_id: *players
+    id: state
+variables:
+  active: [playing, paused]
+  cold_now: >-
+    {{ 'coldplay' in (trigger.to_state.attributes.media_artist | default('', true) | lower)
+       and trigger.to_state.state in active }}
+  cold_was: >-
+    {{ trigger.from_state is not none
+       and 'coldplay' in (trigger.from_state.attributes.media_artist | default('', true) | lower)
+       and trigger.from_state.state in active }}
+  muted: "{{ trigger.to_state.attributes.is_volume_muted | default(false) }}"
+actions:
+  - choose:
+      - alias: "Coldplay started: mute"
+        conditions:
+          - condition: template
+            value_template: "{{ cold_now and not muted }}"
+        sequence:
+          - action: media_player.volume_mute
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+            data:
+              is_volume_muted: true
+      - alias: "Coldplay ended: unmute"
+        conditions:
+          - condition: template
+            value_template: "{{ cold_was and not cold_now and muted }}"
+        sequence:
+          - action: media_player.volume_mute
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+            data:
+              is_volume_muted: false
